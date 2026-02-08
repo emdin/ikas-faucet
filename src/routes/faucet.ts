@@ -11,6 +11,8 @@ import {
 
 const router = Router();
 const ADDRESS_RE = /^0x[a-fA-F0-9]{40}$/;
+const SIG_RE = /^0x[a-fA-F0-9]{130}$/;
+const MAX_CHALLENGE_LEN = 256;
 
 router.get("/status", async (_req: Request, res: Response) => {
   try {
@@ -21,20 +23,20 @@ router.get("/status", async (_req: Request, res: Response) => {
       balance: `${balance} iKAS`,
       chainId: config.chainId,
       network: "IGRA Galleon Test Mainnet",
-      rpc: config.rpcUrl,
       limits: {
         perRequest: `${config.dripAmount} iKAS`,
         dailyPerAddress: `${config.dailyLimit} iKAS`,
       },
     });
-  } catch (err: any) {
-    res.status(500).json({ error: err.message });
+  } catch (err: unknown) {
+    console.error("Status error:", err);
+    res.status(503).json({ error: "Service temporarily unavailable" });
   }
 });
 
 router.post("/challenge", (req: Request, res: Response) => {
   const { address } = req.body;
-  if (!address || !ADDRESS_RE.test(address)) {
+  if (typeof address !== "string" || !ADDRESS_RE.test(address)) {
     res.status(400).json({ error: "Invalid address format" });
     return;
   }
@@ -46,12 +48,21 @@ router.post("/drip", async (req: Request, res: Response) => {
   try {
     const { address, signature, challenge } = req.body;
 
-    if (!address || !ADDRESS_RE.test(address)) {
+    // Validate types and formats
+    if (typeof address !== "string" || !ADDRESS_RE.test(address)) {
       res.status(400).json({ error: "Invalid address format" });
       return;
     }
-    if (!signature || !challenge) {
-      res.status(400).json({ error: "Missing signature or challenge" });
+    if (typeof signature !== "string" || !SIG_RE.test(signature)) {
+      res.status(400).json({ error: "Invalid signature format" });
+      return;
+    }
+    if (
+      typeof challenge !== "string" ||
+      challenge.length > MAX_CHALLENGE_LEN ||
+      challenge.length === 0
+    ) {
+      res.status(400).json({ error: "Invalid challenge format" });
       return;
     }
 
@@ -69,7 +80,7 @@ router.post("/drip", async (req: Request, res: Response) => {
       return;
     }
 
-    // Validate challenge
+    // Validate challenge (freshness, replay, domain)
     const challengeResult = validateChallenge(challenge, address);
     if (!challengeResult.valid) {
       res.status(401).json({ error: challengeResult.error });
@@ -93,9 +104,9 @@ router.post("/drip", async (req: Request, res: Response) => {
       dailyRemaining: rateResult.remaining - 1,
       explorer: `https://explorer.galleon.igralabs.com/tx/${txHash}`,
     });
-  } catch (err: any) {
+  } catch (err: unknown) {
     console.error("Drip error:", err);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: "Transaction failed. Try again later." });
   }
 });
 

@@ -5,27 +5,31 @@ import crypto from "crypto";
 
 interface State {
   usage: Record<string, number[]>;
-  usedChallenges: Record<string, boolean>;
 }
 
 const challenges = new Map<string, { address: string; expiresAt: number }>();
-let state: State = { usage: {}, usedChallenges: {} };
+let state: State = { usage: {} };
 
 export function loadState(): void {
   if (existsSync(config.stateFile)) {
     try {
       const raw = readFileSync(config.stateFile, "utf-8");
-      state = JSON.parse(raw);
+      const parsed = JSON.parse(raw);
+      state = { usage: parsed.usage || {} };
     } catch {
-      state = { usage: {}, usedChallenges: {} };
+      state = { usage: {} };
     }
   }
 }
 
 export function flushState(): void {
-  const dir = dirname(config.stateFile);
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  writeFileSync(config.stateFile, JSON.stringify(state, null, 2));
+  try {
+    const dir = dirname(config.stateFile);
+    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+    writeFileSync(config.stateFile, JSON.stringify(state, null, 2));
+  } catch (err) {
+    console.error("Failed to flush state:", err);
+  }
 }
 
 export function startPeriodicFlush(): void {
@@ -53,12 +57,20 @@ export function validateChallenge(
   const parts = challenge.split(":");
   if (parts.length !== 5) return { valid: false, error: "Malformed challenge" };
 
-  const [domain, , uuid, action, challengeAddr] = parts;
+  const [domain, timestampStr, uuid, action, challengeAddr] = parts;
   if (domain !== config.domain) return { valid: false, error: "Wrong domain" };
   if (action !== "drip") return { valid: false, error: "Wrong action" };
   if (challengeAddr.toLowerCase() !== address.toLowerCase())
     return { valid: false, error: "Address mismatch" };
 
+  // Validate timestamp is a number and within TTL window
+  const timestamp = parseInt(timestampStr, 10);
+  if (isNaN(timestamp)) return { valid: false, error: "Invalid timestamp" };
+  const age = Math.floor(Date.now() / 1000) - timestamp;
+  if (age < 0 || age > config.challengeTTL)
+    return { valid: false, error: "Challenge expired" };
+
+  // Validate UUID exists in memory (prevents replay)
   const stored = challenges.get(uuid);
   if (!stored) return { valid: false, error: "Challenge not found or expired" };
   if (stored.expiresAt < Date.now())
@@ -66,9 +78,8 @@ export function validateChallenge(
   if (stored.address !== address.toLowerCase())
     return { valid: false, error: "Address mismatch" };
 
-  // Mark as used
+  // Mark as used — delete from memory
   challenges.delete(uuid);
-  state.usedChallenges[uuid] = true;
 
   return { valid: true };
 }

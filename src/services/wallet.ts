@@ -8,6 +8,9 @@ const provider = new JsonRpcProvider(config.rpcUrl, {
 
 let faucetWallet: Wallet;
 
+// Simple mutex to serialize transactions and prevent nonce collisions
+let txQueue: Promise<void> = Promise.resolve();
+
 export function initWallet(): Wallet {
   const key = process.env.FAUCET_PRIVATE_KEY;
   if (!key) throw new Error("FAUCET_PRIVATE_KEY is not set");
@@ -20,17 +23,27 @@ export function getWallet(): Wallet {
   return faucetWallet;
 }
 
-export async function sendDrip(to: string): Promise<string> {
-  const wallet = getWallet();
-  const gasPrice = (await provider.getFeeData()).gasPrice;
-  const tx = await wallet.sendTransaction({
-    to,
-    value: parseEther(config.dripAmount),
-    type: 0,
-    gasPrice,
+export function sendDrip(to: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    txQueue = txQueue
+      .then(async () => {
+        const wallet = getWallet();
+        const gasPrice = (await provider.getFeeData()).gasPrice;
+        const nonce = await wallet.getNonce("pending");
+        const tx = await wallet.sendTransaction({
+          to,
+          value: parseEther(config.dripAmount),
+          type: 0,
+          gasPrice,
+          nonce,
+        });
+        await tx.wait(1);
+        resolve(tx.hash);
+      })
+      .catch((err) => {
+        reject(err);
+      });
   });
-  await tx.wait(1);
-  return tx.hash;
 }
 
 export async function getFaucetBalance(): Promise<string> {
