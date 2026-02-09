@@ -37,7 +37,6 @@ export function sendDrip(to: string): Promise<string> {
           gasPrice,
           nonce,
         });
-        await tx.wait(1);
         resolve(tx.hash);
       })
       .catch((err) => {
