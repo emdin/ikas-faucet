@@ -8,7 +8,8 @@ const provider = new JsonRpcProvider(config.rpcUrl, {
 
 let faucetWallet: Wallet;
 
-// Simple mutex to serialize transactions and prevent nonce collisions
+// Local nonce tracking to avoid querying the node between rapid sends
+let nextNonce: number | null = null;
 let txQueue: Promise<void> = Promise.resolve();
 
 export function initWallet(): Wallet {
@@ -29,7 +30,11 @@ export function sendDrip(to: string): Promise<string> {
       .then(async () => {
         const wallet = getWallet();
         const gasPrice = (await provider.getFeeData()).gasPrice;
-        const nonce = await wallet.getNonce("pending");
+        if (nextNonce === null) {
+          nextNonce = await wallet.getNonce("pending");
+        }
+        const nonce = nextNonce;
+        nextNonce++;
         const tx = await wallet.sendTransaction({
           to,
           value: parseEther(config.dripAmount),
@@ -40,6 +45,8 @@ export function sendDrip(to: string): Promise<string> {
         resolve(tx.hash);
       })
       .catch((err) => {
+        // Reset nonce on failure so next tx re-fetches from node
+        nextNonce = null;
         reject(err);
       });
   });
