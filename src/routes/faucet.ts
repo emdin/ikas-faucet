@@ -2,6 +2,7 @@ import { Router, Request, Response } from "express";
 import { verifyMessage } from "ethers";
 import { config } from "../config.js";
 import { sendDrip, getWallet, getFaucetBalance } from "../services/wallet.js";
+import { checkAndAlertLowBalance } from "../services/telegram.js";
 import {
   generateChallenge,
   validateChallenge,
@@ -104,6 +105,11 @@ router.post("/drip", async (req: Request, res: Response) => {
       dailyRemaining: rateResult.remaining - 1,
       explorer: `https://explorer.galleon.igralabs.com/tx/${txHash}`,
     });
+
+    // Check balance and alert if low (fire-and-forget)
+    getFaucetBalance()
+      .then((bal) => checkAndAlertLowBalance(parseFloat(bal)))
+      .catch(() => {});
   } catch (err: unknown) {
     console.error("Drip error:", err);
     res.status(500).json({ error: "Transaction failed. Try again later." });

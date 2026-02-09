@@ -13,4 +13,7 @@ export const config = {
   domain: "igra-faucet",
   stateFile: join(__dirname, "..", "store", "state.json"),
   flushInterval: 60_000,
+  telegramBotToken: process.env.TELEGRAM_BOT_TOKEN || "",
+  telegramChatId: process.env.TELEGRAM_CHAT_ID || "",
+  lowBalanceThreshold: 100, // iKAS
 };
